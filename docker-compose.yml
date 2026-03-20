@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    container_name: ai-platform-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/aiproduct
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - SECRET_KEY=development-secret-key
+      - DEBUG=true
+    depends_on:
+      - db
+      - redis
+      - rabbitmq
+    volumes:
+      - ./app:/app/app
+      - ./models:/app/models
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build: .
+    container_name: ai-platform-worker
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/aiproduct
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - SECRET_KEY=development-secret-key
+    depends_on:
+      - db
+      - redis
+      - rabbitmq
+    volumes:
+      - ./app:/app/app
+      - ./models:/app/models
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=4
+
+  beat:
+    build: .
+    container_name: ai-platform-beat
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/aiproduct
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - SECRET_KEY=development-secret-key
+    depends_on:
+      - db
+      - redis
+      - rabbitmq
+    command: celery -A app.celery_app beat --loglevel=info
+
+  flower:
+    build: .
+    container_name: ai-platform-flower
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - SECRET_KEY=development-secret-key
+    depends_on:
+      - rabbitmq
+      - redis
+    command: celery -A app.celery_app flower --port=5555
+
+  db:
+    image: postgres:15-alpine
+    container_name: ai-platform-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=aiproduct
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai-platform-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: ai-platform-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ai-platform-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ai-platform-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+  prometheus_data:
+  grafana_data:
